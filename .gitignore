@@ -1,5 +1,7 @@
 *.class
 *.log
+# generated data files in the intermediate
+*.al
 
 # sbt specific
 dist/*
