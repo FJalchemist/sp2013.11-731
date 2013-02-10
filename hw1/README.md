@@ -1,3 +1,7 @@
+11-731 Machine Translation Spring 2013 
+
+Yibin Lin
+
 There are three Python programs here (`-h` for usage):
 
  - `./align` aligns words using Dice's coefficient.
