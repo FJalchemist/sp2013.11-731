@@ -3,11 +3,11 @@ import optparse
 import sys
 from collections import defaultdict
 
-"""
-check wether the translation probability is converged.
-returns true if it does.
-"""
 def checkConvergence(t_now, t_old):
+    """
+    check wether the translation probability is converged.
+    returns true if it does.
+    """
     THRESHOLD = 0.01;
     if len(t_old) != len(t_now):
         #Second iteration
@@ -23,6 +23,20 @@ def checkConvergence(t_now, t_old):
     else:
         return False
 
+def simpleAlignmentEst(t_prob, e, f):
+    """
+    a simple, greedy alignment estimation from english to foreign sentence. A decoding method coming from hindi-english-word-alignment (http://code.google.com/p/hindi-english-word-alignment).
+    """
+    alignment = []
+    for i in range(len(e)):
+        best_align = (-1.0, -1)
+        for j in range(len(f)):
+            fword = f[j]
+            if t_prob[eword + GIVEN + fword] > best_align[0]:
+                best_align[0] = t_prob[eword + GIVEN + fword]
+                best_align[1] = i
+        alignment.append((j,i))
+    return alignment
 
 optparser = optparse.OptionParser()
 optparser.add_option("-b", "--bitext", dest="bitext", default="data/dev-test-train.de-en", help="Parallel corpus (default data/dev-test-train.de-en)")
@@ -47,22 +61,29 @@ while not checkConvergence(t_now, t_old):
     In the following, n is the sentence order number (id, int), f is the German sentence (list of string), and e is the English sentence (list of string).
     """
     for (n, (f, e)) in enumerate(bitext):
+        #get all unique tokens in e and f.
         set_e.update(set(e))
         set_f.update(set(f))
 
         s-total = defaultdict(float)
         for eword in e:
             for fword in f:
-                if t_now[e] != 0:
-                    s-total[e] += t_now[e + GIVEN + f]
+                if t_now[eword] != 0:
+                    s-total[eword] += t_now[eword + GIVEN + fword]
                 else:
-                    t_now[e + GIVEN + f] = INIT_TRANS_PROB
-                    s-total(e) += t_now[e + GIVEN + f]
+                    t_now[eword + GIVEN + fword] = INIT_TRANS_PROB
+                    s-total(eword) += t_now[eword + GIVEN + fword]
+        #E
         for eword in e:
             for fword in f:
-                count[e + GIVEN + f] += t_now[e + GIVEN + f] / s-total[e]
-                total[f] += t_now[e + GIVEN + f] / s-total[e]
-    for 
+                count[eword + GIVEN + fword] += t_now[eword + GIVEN + fword] / s-total[eword]
+                total[fword] += t_now[eword + GIVEN + fword] / s-total[eword]
+    t_old = t_now
+    #M
+    for eword in set_e:
+        for fword in set_f:
+            t_now[eword + GIVEN + fword] = count[eword + GIVEN + fword] / total[fword]
+
 
     #  for f_i in set(f):
     #    f_count[f_i] += 1
