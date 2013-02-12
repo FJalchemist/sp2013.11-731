@@ -2,6 +2,12 @@
 
 Yibin Lin
 
+Feb. 12 2013
+
+Algorithm description: 
+
+
+---------------------------------------------------------------------- original README CONTENT
 There are three Python programs here (`-h` for usage):
 
  - `./align` aligns words using Dice's coefficient.
