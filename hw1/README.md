@@ -6,6 +6,15 @@ Feb. 12 2013
 
 Algorithm description: 
 
+The main idea I had doing this project is from the "Statistical Machine Translation" book, sections 4.1, 4.2 and especially 4.5. 
+
+IBM model 1 is implemented first, then according to section 4.5, the reverse translation probability (from f to e) by IBM is also trained. Then we have two sets of alignments: alignmentA that is the alignment from e to f and alignmentB that is the alignment from f to e. 
+
+Then the intersection of alignmentA and alignmentB is computed. We compare alignmentA and alignmentB with the computed intersection again, and add any element in A and B that has edit distance of less than 2 to the element of the intersection to the final result. The distance number 2 is determined by experiments.
+
+The edit distance is defined as follows: for alignment (i-j) and (m-n):
+edit distance = |i-m| + |j-n|.
+I.e. the sum of absolute values of the difference of index in each language sentence.
 
 ---------------------------------------------------------------------- original README CONTENT
 There are three Python programs here (`-h` for usage):
