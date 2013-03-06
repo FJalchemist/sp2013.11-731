@@ -1,20 +1,71 @@
 #!/usr/bin/env python
 import argparse # optparse is deprecated
 from itertools import islice # slicing for iterators
+import re
+from nltk.stem.porter import PorterStemmer
 
+"""
+Simple METEOR evaluation, by description from Wikipedia
+"""
 def getAlignment(h, ref):
     """
     Get the alignment of each word in the hypothesis to the reference.
     h and ref are list of splitted tokens (~words).
     """
+    if len(h) == 0 or len(ref) == 0:
+        return ([], 0.0)
+    stemmer = PorterStemmer()
+    h = [stemmer.stem(x) for x in h]
+    ref = [stemmer.stem(x) for x in ref]
     res = [(i,j) for i, w in enumerate(h) for j, rw in enumerate(ref) if w == rw]
     h_uniq = set()
     h_uniq_add = h_uniq.add
     ref_uniq = set()
     ref_uniq_add = ref_uniq.add
     res = [x for x in res if x[0] not in h_uniq and not h_uniq_add(x[0]) and x[1] not in ref_uniq and not ref_uniq_add(x[1])]
-    return res
-                
+    precision = len(res) * 1.0 / len(h)
+    recall = len(res) * 1.0 / len(ref)
+#    print h, ref, precision, recall
+    if precision == recall and precision == 0:
+        f_mean = 0.0
+    else:
+        f_mean = (10.0 * precision * recall) / (recall + 9.0 * precision)
+    return (res, f_mean)
+
+def calcChunks(align):
+    """
+    Given alignments, calculate the number of chunks, and then calculate the penalty score in METEOR..
+    """
+    s_align = sorted(align)
+    chunks = []
+    c_list = [] #representing current chunk
+    for (i, j) in s_align:
+        if len(c_list) == 0:
+            c_list.append((i,j))
+        else:
+            if ( (min([x[0] for x in c_list])-1) <= i <= (max([x[0] for x in c_list])+1) ) and ( (min([x[1] for x in c_list])-1) <= j <= (max([x[1] for x in c_list])+1) ):
+                c_list.append((i,j))
+            else:
+                chunks.append(c_list)
+                c_list = []
+                c_list.append((i,j))
+    chunks.append(c_list)
+    c = len(chunks)
+    um = len(align)
+    if um == 0:
+        penalty = 0.5
+    else:
+        penalty = 0.5 * ((c * 1.0) / um)**3
+    return penalty
+
+def calcSimpleMETEOR(h, ref):
+    """
+    Calculate simple METEOR score..
+    """
+    (align, f_mean) = getAlignment(h, ref)
+    penalty = calcChunks(align)
+    score = f_mean * (1.0 - penalty)
+    return score
 
 def main():
     """
@@ -33,11 +84,15 @@ def main():
     def sentences():
         with open(opts.input) as f:
             for pair in f:
-                yield [sentence.strip().split() for sentence in pair.split(' ||| ')]
+                yield [re.findall(r"[\w]+", sentence.strip()) for sentence in pair.split(' ||| ')]
  
     # note: the -n option does not work in the original code
     for h1, h2, ref in islice(sentences(), opts.num_sentences):
-        print getAlignment(h1, ref)
+        s1 = calcSimpleMETEOR(h1, ref)
+        s2 = calcSimpleMETEOR(h2, ref)
+        print(-1 if s1 > s2 else # \begin{cases}
+                (0 if s1 == s2
+                    else 1)) # \end{cases}
         """
         rset = set(ref)
         h1_match = word_matches(h1, rset)
