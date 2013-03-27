@@ -2,6 +2,7 @@
 *.log
 # generated data files in the intermediate
 *.al
+*.pyc
 
 # sbt specific
 dist/*

@@ -30,6 +30,7 @@ opts = parser.parse_args()
 tm = models.TM(opts.tm,sys.maxint)
 lm = models.LM(opts.lm)
 french_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()]
+# MT output.. 
 english_sents = [tuple(line.strip().split()) for line in sys.stdin]
 if (len(french_sents) != len(english_sents)):
     sys.stderr.write("ERROR: French and English files are not the same length! Only complete output can be graded!\n")
