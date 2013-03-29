@@ -19,7 +19,32 @@ lm = models.LM(opts.lm)
 sys.stderr.write('Decoding %s...\n' % (opts.input,))
 input_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
 
-hypothesis = namedtuple('hypothesis', 'logprob, lm_state, predecessor, phrase')
+def getTranslationOptions(f, h):
+    """
+    Given a sentence to translate and a translation hypothesis, return all possible translation options available - among the words that haven't been translated. 
+    (1). Get all chunks of words that haven't been translated. 
+    (2). scan through all chunks of words, and then iterate each chunk, and 
+    """
+    free_indices = [i for i in xrange(0, len(h.t_indices)) if h.t_indices[i] == False]
+    free_chunks = []
+    c_start = -1
+    c_index = -1
+    for i in free_indices:
+        if c_start == -1:
+            c_start = i
+            c_index = i
+        elif (c_index + 1) == i: #continue
+            c_index = i
+        else: #break;
+            free_chunks.append((c_start, (c_index + 1)))
+            c_start = i
+            c_index = i
+    free_chunks.append((c_start, (c_index + 1)))
+    return free_chunks
+
+
+# added t_words for translated words.. 
+hypothesis = namedtuple('hypothesis', 'logprob, lm_state, t_indices, predecessor, phrase')
 for f in input_sents:
     # The following code implements a DP monotone decoding
     # algorithm (one that doesn't permute the target phrases).
@@ -28,25 +53,35 @@ for f in input_sents:
     # HINT: Generalize this so that stacks[i] contains translations
     # of any i words (remember to keep track of which words those
     # are, and to estimate future costs)
-    initial_hypothesis = hypothesis(0.0, lm.begin(), None, None)
+    initial_hypothesis = hypothesis(0.0, lm.begin(), None, [False]*len(f), None)
 
+    # stack of hypothesis by 0 to sentence length, including the empty (initial) hypothesis.. 
     stacks = [{} for _ in f] + [{}]
     stacks[0][lm.begin()] = initial_hypothesis
     for i, stack in enumerate(stacks[:-1]):
-        # extend the top s hypotheses in the current stack
-        for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: h.logprob): # prune
-            for j in xrange(i+1,len(f)+1):
-                if f[i:j] in tm:
-                    for phrase in tm[f[i:j]]:
-                        logprob = h.logprob + phrase.logprob
-                        lm_state = h.lm_state
-                        for word in phrase.english.split():
-                            (lm_state, word_logprob) = lm.score(lm_state, word)
-                            logprob += word_logprob
-                        logprob += lm.end(lm_state) if j == len(f) else 0.0
-                        new_hypothesis = hypothesis(logprob, lm_state, h, phrase)
-                        if lm_state not in stacks[j] or stacks[j][lm_state].logprob < logprob: # second case is recombination
-                            stacks[j][lm_state] = new_hypothesis 
+        # extend the top s hypotheses in the current stack, only build a heap queue on the fly.. 
+        for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: h.logprob): # prune - TBD: may be fraction based prunning is better? 
+            free_chunks = getTranslationOptions(h)
+            for (s, e) in free_chunks: # not including e.. 
+                for j in xrange(1, (e - s)): #range
+                    for k in xrange(s, (e-j+1)):
+                        if f[k:(k+j)] in tm: #french phrase in the tm.. 
+                            for phrase in tm[f[k:(k+j)]]: # english phrases
+        #                        sys.stderr.write("%s\n" % (tm[f[i:j]][0][0]))
+                                logprob = h.logprob + phrase.logprob
+                                lm_state = h.lm_state
+                                for word in phrase.english.split():
+                                    (lm_state, word_logprob) = lm.score(lm_state, word)
+                                    logprob += word_logprob
+                                logprob += lm.end(lm_state) if j == len(f) else 0.0
+
+                                t_indices_this = h.t_indices[:] # create a new list
+                                for i in xrange(s, e):
+                                    t_indices_this[i] = True
+                                new_hypothesis = hypothesis(logprob, lm_state, t_indices_this, h, phrase) #TBD
+                                
+                                if lm_state not in stacks[j] or stacks[j][lm_state].logprob < logprob: # second case is recombination
+                                    stacks[j][lm_state] = new_hypothesis 
 
     # find best translation by looking at the best scoring hypothesis
     # on the last stack

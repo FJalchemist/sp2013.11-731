@@ -2,6 +2,14 @@
 # Simple translation model and language model data structures
 import sys
 from collections import namedtuple
+import math
+
+def d(start_i, end_last, alpha):
+    """
+    The reordering distortion function. Alpha is a variable - need to run multiple times to fix the optimal value.. 
+    """
+    return math.pow(alpha, (start_i - end_last - 1))
+    
 
 # A translation model is a dictionary where keys are tuples of French words
 # and values are lists of (english, logprob) named tuples. For instance,
