@@ -3,15 +3,16 @@ import argparse
 import sys
 import models
 import heapq
+import math
 from collections import namedtuple
 
-def getFreeChunks(h):
+def getFreeChunks(t_indices):
     """
     Given a sentence to translate and a translation hypothesis, return all possible translation options available - among the words that haven't been translated. 
     (1). Get all chunks of words that haven't been translated. 
     (2). scan through all chunks of words, and then iterate each chunk, and 
     """
-    free_indices = [i for i in xrange(0, len(h.t_indices)) if h.t_indices[i] == False]
+    free_indices = [i for i in xrange(0, len(t_indices)) if h.t_indices[i] == False]
     free_chunks = []
     c_start = -1
     c_index = -1
@@ -28,6 +29,40 @@ def getFreeChunks(h):
     if c_start != -1:
         free_chunks.append((c_start, (c_index + 1)))
     return free_chunks
+
+def estimateFutureCost(t_indices, f, tm, lm):
+    """
+    Use dynamic programming to estimate the future cost of t_indices
+    """
+    est_cost = 0.0
+    chunks = getFreeChunks(t_indices)
+    for chunk in chunks:
+        (s, e) = chunk
+        n = e-s
+#        sys.stderr.write("%d!!!\n" % n)
+        chunk_str = f[s:e]
+        cost_table = [[float("-inf")] * (n + 1)] * (n + 1) # two-dimentional dp table
+        for length in xrange(1, n + 1):
+            for start in xrange(0, (n + 1-length) ):
+                end = start + length
+                f_phrase = chunk_str[start:end]
+                max_prob = float("-inf")
+                if f_phrase in tm:
+                    e_phrase = tm[f_phrase][0]
+                    max_prob = e_phrase.logprob #Get the largest
+                    lm_state = ()
+                    for word in e_phrase.english.split():
+                        (lm_state, word_logprob) = lm.score(lm_state, word)
+                        max_prob += word_logprob
+                cost_table[start][end] = max_prob
+
+                for i in xrange((start + 1), end):
+                    if cost_table[start][i] + cost_table[i][end] > max_prob:
+                        cost_table[start][end] = cost_table[start][i] + cost[i][end]
+#        sys.stderr.write(str(len(cost_table)))
+        est_cost += cost_table[0][n]
+    return est_cost
+
 
 def printNewlyAddedHypothesis(idx, hyp):
     """
@@ -46,15 +81,17 @@ parser.add_argument('-s', '--stack-size', dest='s', default=1, type=int, help='M
 parser.add_argument('-n', '--num_sentences', dest='num_sents', default=sys.maxint, type=int, help='Number of sentences to decode (default=no limit)')
 parser.add_argument('-l', '--language-model', dest='lm', default='data/lm', help='File containing ARPA-format language model (default=data/lm)')
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', default=False,  help='Verbose mode (default=off)')
+parser.add_argument('-a', '--alpha', dest='alpha', default=0.9,  help='Verbose mode (default=off)')
 opts = parser.parse_args()
 
+alpha = float(opts.alpha) # distortion probability
 tm = models.TM(opts.tm, sys.maxint)
 lm = models.LM(opts.lm)
 sys.stderr.write('Decoding %s...\n' % (opts.input,))
 input_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
 
 # added t_words for translated words.. 
-hypothesis = namedtuple('hypothesis', 'logprob, lm_state, t_indices, predecessor, phrase')
+hypothesis = namedtuple('hypothesis', 'logprob, future_estimate, lm_state, end_index, t_indices, predecessor, phrase')
 for f in input_sents:
     if DEBUG:
         sys.stderr.write("Sentence: %s. Length: %d\n" % (" ".join(f), len(f)))
@@ -69,18 +106,21 @@ for f in input_sents:
     # HINT: Generalize this so that stacks[i] contains translations
     # of any i words (remember to keep track of which words those
     # are, and to estimate future costs)
-    initial_hypothesis = hypothesis(0.0, lm.begin(), [False]*len(f), None, None)
+    """
+    end index == -1..
+    """
+    initial_hypothesis = hypothesis(0.0, -1.0, lm.begin(), -1, [False]*len(f), None, None) # no future estimate for the empty hypothesis
 
     # stack of hypothesis by 0 to sentence length, including the empty (initial) hypothesis.. 
     stacks = [{} for _ in f] + [{}]
-    stacks[0][str(initial_hypothesis.t_indices)] = initial_hypothesis
+    stacks[0][str(initial_hypothesis.t_indices) + str(initial_hypothesis.end_index)] = initial_hypothesis
     for i, stack in enumerate(stacks[:-1]):
         if DEBUG:
             sys.stderr.write("f sentence: %s\n" % (" ".join(f)))
             sys.stderr.write("Current stack slot: %d, total: %d, length of sentence: %s.\n" % (i, len(stacks), len(f)))
         # extend the top s hypotheses in the current stack, only build a heap queue on the fly.. 
-        for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: h.logprob): # prune - TBD: may be fraction based prunning is better? 
-            free_chunks = getFreeChunks(h)
+        for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: h.future_estimate): # prune - TBD: may be fraction based prunning is better? 
+            free_chunks = getFreeChunks(h.t_indices)
 
             if DEBUG:
                 sys.stderr.write("%s\n" % str(free_chunks))
@@ -94,28 +134,36 @@ for f in input_sents:
                         if (k+j) == len(f) and (i+j) != len(f): # just to make sure the period (the last part of the sentence) is decoded last.
                             continue
 
+                        if (math.fabs(k - h.end_index) > 10.0): # exceeding the reordering limit, continue.
+                            if DEBUG:
+                                sys.stderr.write("exceeding reordering limit! k: %d, h_end: %d\n" % (k, h.end_index))
+                            continue
+
                         if f[k:(k+j)] in tm: #french phrase in the tm.. 
                             if DEBUG: 
                                 sys.stderr.write("entered here! Found in tm.\n")
                             for phrase in tm[f[k:(k+j)]]: # english phrases
 
-                                """
-                                The following needs to be rewritten - the lm is not continuous any more!
-                                """
-                                logprob = h.logprob + phrase.logprob
-                                lm_state = h.lm_state
+                                logprob = h.logprob + phrase.logprob #add translation probability
+
+                                lm_state = h.lm_state #add language modeling probability
                                 for word in phrase.english.split():
                                     (lm_state, word_logprob) = lm.score(lm_state, word)
                                     logprob += word_logprob
                                 logprob += lm.end(lm_state) if (k+j) == len(f) else 0.0
 
+                                #add reordering probability
+                                logprob += models.d(s, h.end_index, alpha)
+
                                 t_indices_this = h.t_indices[:] # create a new list, copy the old hypothesis indices.
                                 for covered_idx in xrange(k, (k+j)):
                                     t_indices_this[covered_idx] = True
-                                new_hypothesis = hypothesis(logprob, lm_state, t_indices_this, h, phrase)
+                                f_cost_this = estimateFutureCost(t_indices_this, f, tm, lm)
+                                new_hypothesis = hypothesis(logprob, f_cost_this, lm_state, (k+j-1), t_indices_this, h, phrase)
+                                new_key = str(t_indices_this)+str(k+j-1)
                       
-                                if str(t_indices_this) not in stacks[i+j] or stacks[i+j][str(t_indices_this)].logprob < logprob: # second case is recombination. (i+j) is the new slot position in the stack. 
-                                    stacks[i+j][str(t_indices_this)] = new_hypothesis
+                                if new_key not in stacks[i+j] or stacks[i+j][new_key].logprob < logprob: # second case is recombination. (i+j) is the new slot position in the stack. 
+                                    stacks[i+j][new_key] = new_hypothesis
                                     if DEBUG:
                                         printNewlyAddedHypothesis((i+j), new_hypothesis)
 

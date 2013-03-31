@@ -8,7 +8,7 @@ def d(start_i, end_last, alpha):
     """
     The reordering distortion function. Alpha is a variable - need to run multiple times to fix the optimal value.. 
     """
-    return math.pow(alpha, (start_i - end_last - 1))
+    return math.log10(math.pow(alpha, (start_i - end_last - 1)))
     
 
 # A translation model is a dictionary where keys are tuples of French words
