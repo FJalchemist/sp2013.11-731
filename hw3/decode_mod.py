@@ -30,6 +30,16 @@ def getFreeChunks(t_indices):
         free_chunks.append((c_start, (c_index + 1)))
     return free_chunks
 
+def printCostTable(cost_table, small, large):
+    """
+    print out the cost table for debugging...
+    """
+    sys.stderr.write("*********************starting to print**********************: \n")
+    for i in xrange(small, large+1):
+        for j in xrange(i+1, large+1):
+            sys.stderr.write("%f, " % (cost_table[i, j]))
+        sys.stderr.write("\n")
+
 def estimateFutureCost(t_indices, f, tm, lm):
     """
     Use dynamic programming to estimate the future cost of t_indices
@@ -40,27 +50,41 @@ def estimateFutureCost(t_indices, f, tm, lm):
         (s, e) = chunk
         n = e-s
 #        sys.stderr.write("%d!!!\n" % n)
-        chunk_str = f[s:e]
-        cost_table = [[float("-inf")] * (n + 1)] * (n + 1) # two-dimentional dp table
+        f_str = " ".join(f)
+#        sys.stderr.write("f_str: %s\n" % (f_str))
+        chunk_tuple = f[s:e]
+        cost_table = {} # two-dimentional dp table, cannot be created like: [[float("inf") * n]*n] that is wrong!!!!
         for length in xrange(1, n + 1):
             for start in xrange(0, (n + 1-length) ):
                 end = start + length
-                f_phrase = chunk_str[start:end]
+#                sys.stderr.write("start: %d, end: %d\n" % (start, end))
+                f_phrase = chunk_tuple[start:end]
+#                sys.stderr.write("%s\n" % (str(type(f_phrase))))
+#                sys.stderr.write("f_phrase: %s\n" % (f_phrase))
                 max_prob = float("-inf")
                 if f_phrase in tm:
+                    max_prob = 0.0
                     e_phrase = tm[f_phrase][0]
+#                    sys.stderr.write("english phrase: %s\n" % (str(e_phrase.english)))
                     max_prob = e_phrase.logprob #Get the largest
+#                    sys.stderr.write("e_phrase logprob: %f\n" % e_phrase.logprob)
                     lm_state = ()
-                    for word in e_phrase.english.split():
+                    for word in e_phrase.english.split(): #estimate lm probability
                         (lm_state, word_logprob) = lm.score(lm_state, word)
                         max_prob += word_logprob
-                cost_table[start][end] = max_prob
+#                    sys.stderr.write("max_prob: %f\n" % max_prob)
+#                sys.stderr.write("start: %d, end: %d, max prob: %f\n" % (start, end, max_prob))
+                cost_table[start, end] = max_prob
 
-                for i in xrange((start + 1), end):
-                    if cost_table[start][i] + cost_table[i][end] > max_prob:
-                        cost_table[start][end] = cost_table[start][i] + cost[i][end]
+                for x in xrange((start + 1), end):
+#                    sys.stderr.write("1st: %f, 2nd: %f, combined: %f, start: %d, i: %d, end: %d\n" % (cost_table[start][x], cost_table[x][end], cost_table[start][end], start, x, end))
+                    if (cost_table[start, x] + cost_table[x, end] > cost_table[start, end]):
+#                        sys.stderr.write("bigger than")
+                        cost_table[start, end] = cost_table[start, x] + cost_table[x, end]
 #        sys.stderr.write(str(len(cost_table)))
-        est_cost += cost_table[0][n]
+        est_cost += cost_table[0, n]
+#        printCostTable(cost_table, 0, n)
+#    sys.stderr.write("estimated cost: %f\n" % (est_cost))
     return est_cost
 
 
@@ -85,7 +109,7 @@ parser.add_argument('-a', '--alpha', dest='alpha', default=0.9,  help='Verbose m
 opts = parser.parse_args()
 
 alpha = float(opts.alpha) # distortion probability
-tm = models.TM(opts.tm, sys.maxint)
+tm = models.TM(opts.tm, 5)
 lm = models.LM(opts.lm)
 sys.stderr.write('Decoding %s...\n' % (opts.input,))
 input_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
@@ -113,20 +137,22 @@ for f in input_sents:
 
     # stack of hypothesis by 0 to sentence length, including the empty (initial) hypothesis.. 
     stacks = [{} for _ in f] + [{}]
-    stacks[0][str(initial_hypothesis.t_indices) + str(initial_hypothesis.end_index)] = initial_hypothesis
+    stacks[0][str(initial_hypothesis.t_indices)] = initial_hypothesis
     for i, stack in enumerate(stacks[:-1]):
         if DEBUG:
             sys.stderr.write("f sentence: %s\n" % (" ".join(f)))
             sys.stderr.write("Current stack slot: %d, total: %d, length of sentence: %s.\n" % (i, len(stacks), len(f)))
+#        sys.stderr.write("Current stack slot: %d, stack slot size: %d, length of sentence: %s.\n" % (i, len(stacks[i]), len(f)))
         # extend the top s hypotheses in the current stack, only build a heap queue on the fly.. 
-        for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: h.future_estimate): # prune - TBD: may be fraction based prunning is better? 
+        for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: (h.future_estimate + h.logprob)): # prune - TBD: may be fraction based prunning is better? 
+#            sys.stderr.write("future_estimate: %f, logprob: %f\n" % (h.future_estimate, h.logprob))
             free_chunks = getFreeChunks(h.t_indices)
 
             if DEBUG:
                 sys.stderr.write("%s\n" % str(free_chunks))
 
             for (s, e) in free_chunks: # not including e.. 
-                for j in xrange(1, (e - s + 1)): #range
+                for j in xrange(1, (e - s + 1)): #range, length
                     for k in xrange(s, (e - j + 1)): #substring starting point
                         if DEBUG:
                             sys.stderr.write("entered here! %s.\n" % (str(f[k:(k+j)])))
@@ -134,10 +160,12 @@ for f in input_sents:
                         if (k+j) == len(f) and (i+j) != len(f): # just to make sure the period (the last part of the sentence) is decoded last.
                             continue
 
-                        if (math.fabs(k - h.end_index) > 10.0): # exceeding the reordering limit, continue.
+                        if (math.fabs(k - h.end_index - 1) > 3.5): # exceeding the reordering limit, continue
                             if DEBUG:
-                                sys.stderr.write("exceeding reordering limit! k: %d, h_end: %d\n" % (k, h.end_index))
+                                sys.stderr.write("exceeding reordering limit! k: %d, h_end: %d.\n" % (k, h.end_index))
                             continue
+
+#                        sys.stderr.write("k: %d, h_end: %d\n" % (k, h.end_index))
 
                         if f[k:(k+j)] in tm: #french phrase in the tm.. 
                             if DEBUG: 
@@ -153,14 +181,15 @@ for f in input_sents:
                                 logprob += lm.end(lm_state) if (k+j) == len(f) else 0.0
 
                                 #add reordering probability
-                                logprob += models.d(s, h.end_index, alpha)
+                                logprob += models.d(k, h.end_index, alpha)
 
                                 t_indices_this = h.t_indices[:] # create a new list, copy the old hypothesis indices.
                                 for covered_idx in xrange(k, (k+j)):
                                     t_indices_this[covered_idx] = True
                                 f_cost_this = estimateFutureCost(t_indices_this, f, tm, lm)
+#                                sys.stderr.write("%f" % (f_cost_this))
                                 new_hypothesis = hypothesis(logprob, f_cost_this, lm_state, (k+j-1), t_indices_this, h, phrase)
-                                new_key = str(t_indices_this)+str(k+j-1)
+                                new_key = str(t_indices_this) + str((k+j-1))
                       
                                 if new_key not in stacks[i+j] or stacks[i+j][new_key].logprob < logprob: # second case is recombination. (i+j) is the new slot position in the stack. 
                                     stacks[i+j][new_key] = new_hypothesis
