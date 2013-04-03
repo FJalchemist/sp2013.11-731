@@ -109,7 +109,7 @@ parser.add_argument('-a', '--alpha', dest='alpha', default=0.9,  help='Verbose m
 opts = parser.parse_args()
 
 alpha = float(opts.alpha) # distortion probability
-tm = models.TM(opts.tm, 5)
+tm = models.TM(opts.tm, 15)
 lm = models.LM(opts.lm)
 sys.stderr.write('Decoding %s...\n' % (opts.input,))
 input_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
@@ -142,7 +142,7 @@ for f in input_sents:
         if DEBUG:
             sys.stderr.write("f sentence: %s\n" % (" ".join(f)))
             sys.stderr.write("Current stack slot: %d, total: %d, length of sentence: %s.\n" % (i, len(stacks), len(f)))
-#        sys.stderr.write("Current stack slot: %d, stack slot size: %d, length of sentence: %s.\n" % (i, len(stacks[i]), len(f)))
+        sys.stderr.write("Current stack slot: %d, stack slot size: %d, length of sentence: %s.\n" % (i, len(stacks[i]), len(f)))
         # extend the top s hypotheses in the current stack, only build a heap queue on the fly.. 
         for h in heapq.nlargest(opts.s, stack.itervalues(), key=lambda h: (h.future_estimate + h.logprob)): # prune - TBD: may be fraction based prunning is better? 
 #            sys.stderr.write("future_estimate: %f, logprob: %f\n" % (h.future_estimate, h.logprob))
@@ -160,7 +160,7 @@ for f in input_sents:
                         if (k+j) == len(f) and (i+j) != len(f): # just to make sure the period (the last part of the sentence) is decoded last.
                             continue
 
-                        if (math.fabs(k - h.end_index - 1) > 3.5): # exceeding the reordering limit, continue
+                        if (math.fabs(k - h.end_index - 1) > 5.5): # exceeding the reordering limit, continue
                             if DEBUG:
                                 sys.stderr.write("exceeding reordering limit! k: %d, h_end: %d.\n" % (k, h.end_index))
                             continue
