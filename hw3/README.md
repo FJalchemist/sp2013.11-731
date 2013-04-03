@@ -1,3 +1,12 @@
+Algorithm:
+
+Use standard stacked decoding algorithm: 
+(1). future cost estimation
+(2). penalty for reordering (alpha = 0.00001)
+(3). maximum reordering limit = 4
+
+
+------------------------------------------------------------------original file
 There are three Python programs here (`-h` for usage):
 
  - `./decode` a simple non-reordering (monotone) phrase-based decoder
