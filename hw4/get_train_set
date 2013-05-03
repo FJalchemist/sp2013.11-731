@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+import optparse
+import sys
+import bleu
+import random
+import math
+
+optparser = optparse.OptionParser()
+optparser.add_option("-k", "--kbest-list", dest="klist", default="data/dev.100best", help="100-best translation lists")
+optparser.add_option("-r", "--reference", dest="ref", default="data/dev.ref", help="reference translation")
+
+all_hyps = [pair.split(' ||| ') for pair in open(opts.klist)]
+all_refs = [line for line in open(opts.ref)]
+num_sents = len(all_refs)
+
+for s in xrange(0, num_sents):
+    hyps_for_one_sent = all_hyps[s * 100:s * 100 + 100]
+    (best_score, best) = (-1e300, '')
+    for (num, hyp, feats) in hyps_for_one_sent:
+        score = 0.0
+        for feat in feats.split(' '):
+            (k, v) = feat.split('=')
+            score += weights[k] * float(v)
+        if score > best_score:
+            (best_score, best) = (score, hyp)
+    try: 
+        sys.stdout.write("%s\n" % best)
+    except (Exception):
+        sys.exit(1)
+
+def sampler(sample_size, top_k, i, all_refs, all_hypsi, output):
+    """
+    Sampler algorithm in Figure 4 in the PRO paper.
+    """
+    v = set()
+    for _ in xrange(sample_size):
+        j1 = int((100 + 1) * random.random())
+        j2 = int((100 + 1) * random.random())
+        hyp1 = all_hyps[i * 100 + j1]
+        hyp2 = all_hyps[i * 100 + j2]
+        (num1, hyp1, feats1) = hyp1
+        (num2, hyp2, feats2) = hyp2
+        hyp1 = hyp1.strip().split()
+        hyp2 = hyp2.strip().split()
+        ref = all_refs[i].strip().split()
+        g1 = g(hyp1, ref)
+        g2 = g(hyp2, ref)
+        g_score_diff = g1-g2
+        if with_prob(alpha(math.fabs(g_score_diff))):
+            v.add((x(feats1), x(feats2), g_score_diff))
+    v_list = sorted(v, reverse=True)
+
+    outputf = open(output, "w")
+    for i in xrange(top_k):
+        outputf.write(vector_minus(v_list[i][0], v_list[i][1]))
+
+def sign_symbol(f):
+    """
+    return 0 if it is negative, return 1 if it is positove
+    """
+    if 
+
+def vector_minus(v1, v2):
+    l = []
+    res = ""
+    if len(v1) == len(v2):
+        for i in xrange(len(v1)):
+            l.append(v1[i] - v2[i])
+        res += '('
+        for i in xrange(len(v1)-1):
+            res += str(l[i]) + ','
+        res += str(l[(len(v1)-1)]) + ')'
+    return res
+        
+            
+
+def x(feats):
+    """
+    return a vector of features from string feats.
+    in our case the tuple has three elements
+    """
+    l = []
+    for feat in feats.split(' '):
+        (k, v) = feat.split('=')
+        l.append(float(v))
+    if len(l) == 3:
+        return tuple(l)
+    
+def with_prob(p):
+    """
+    check with probability p whether somthing will happen.
+    """
+    val = random.random()
+    if val < p:
+        return True
+    else:
+        return False
+
+def alpha(score_diff):
+    """
+    alpha step function to see weather the score difference will 
+    be put into the samples.
+    score_diff: absolute value of score difference.
+    """
+    if score_diff < 0.05:
+        return 0
+    else:
+        return 1
+
+def g(hyp, ref):
+    """
+    gold local scoring function
+    """
+    stats = [0 for i in xrange(10)]
+    stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(hyp,ref))]
+    g_score = bleu.bleuplus1(stats)
+    return g_score
