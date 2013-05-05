@@ -26,8 +26,8 @@ def bleu(stats):
   return math.exp(min([0, 1-float(r)/c]) + log_bleu_prec)
 
 def bleuplus1(stats):
-  if len(filter(lambda x: x==0, stats)) > 0:
-    return 0
+#  if len(filter(lambda x: x==0, stats)) > 0:
+#    return 0
   (c, r) = stats[:2]
 #  print stats
   log_bleu_prec = sum([math.log(float(x+1)/(y+1)) for x,y in zip(stats[2::2],stats[3::2])]) / 4.

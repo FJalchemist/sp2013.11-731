@@ -4,61 +4,73 @@ import sys
 import bleu
 import random
 import math
+import codecs
+import numpy as np
+    
 
-optparser = optparse.OptionParser()
-optparser.add_option("-k", "--kbest-list", dest="klist", default="data/dev.100best", help="100-best translation lists")
-optparser.add_option("-r", "--reference", dest="ref", default="data/dev.ref", help="reference translation")
-
-all_hyps = [pair.split(' ||| ') for pair in open(opts.klist)]
-all_refs = [line for line in open(opts.ref)]
-num_sents = len(all_refs)
-
-for s in xrange(0, num_sents):
-    hyps_for_one_sent = all_hyps[s * 100:s * 100 + 100]
-    (best_score, best) = (-1e300, '')
-    for (num, hyp, feats) in hyps_for_one_sent:
-        score = 0.0
-        for feat in feats.split(' '):
-            (k, v) = feat.split('=')
-            score += weights[k] * float(v)
-        if score > best_score:
-            (best_score, best) = (score, hyp)
-    try: 
-        sys.stdout.write("%s\n" % best)
-    except (Exception):
-        sys.exit(1)
-
-def sampler(sample_size, top_k, i, all_refs, all_hypsi, output):
+def sampler(sample_size, top_k, ith, all_refs, all_hyps, output, debug=False):
     """
     Sampler algorithm in Figure 4 in the PRO paper.
     """
-    v = set()
-    for _ in xrange(sample_size):
-        j1 = int((100 + 1) * random.random())
-        j2 = int((100 + 1) * random.random())
-        hyp1 = all_hyps[i * 100 + j1]
-        hyp2 = all_hyps[i * 100 + j2]
-        (num1, hyp1, feats1) = hyp1
-        (num2, hyp2, feats2) = hyp2
-        hyp1 = hyp1.strip().split()
-        hyp2 = hyp2.strip().split()
-        ref = all_refs[i].strip().split()
-        g1 = g(hyp1, ref)
-        g2 = g(hyp2, ref)
-        g_score_diff = g1-g2
-        if with_prob(alpha(math.fabs(g_score_diff))):
-            v.add((x(feats1), x(feats2), g_score_diff))
-    v_list = sorted(v, reverse=True)
+    scores = []
+    idx_pair = {}
+    pair_idx = {}
+    pairs = {}
 
-    outputf = open(output, "w")
-    for i in xrange(top_k):
-        outputf.write(vector_minus(v_list[i][0], v_list[i][1]))
+    ref = all_refs[ith].strip().split()
+
+    for i in xrange(100):
+        for j in xrange(i, 100):
+            hyp1 = all_hyps[ith*100 + i]
+            hyp2 = all_hyps[ith*100 + j]
+            (num1, hyp1, feats1) = hyp1
+            (num2, hyp2, feats2) = hyp2
+            hyp1 = hyp1.strip().split()
+            hyp2 = hyp2.strip().split()
+            g1 = g(hyp1, ref)
+            g2 = g(hyp2, ref)
+            g_diff = g1-g2
+            g_diff_abs = math.fabs(g1-g2)
+            pairs[(i, j)] = (x(feats1, hyp1), x(feats2, hyp2), g_diff, g_diff_abs)
+            scores.append(g_diff_abs)
+            idx = len(scores)-1
+            idx_pair[idx] = (i,j)
+            pair_idx[(i,j)] = idx
+
+    sum_score = sum(scores)
+    if sum_score == 0:
+        return
+    probs = [float(scores[i])/sum_score for i in xrange(len(scores))]
+#    print probs
+
+    v = []
+    samples = np.random.multinomial(sample_size, probs)
+    it = np.nditer(samples, flags=['f_index'])
+    cnt = -1
+    for sample in samples:
+        cnt += 1
+        if sample != 0:
+            p = idx_pair[cnt]
+ #           print p
+            if pairs[p][3] > 0.05:
+                v = v+ [(pairs[p])]*sample
+
+    v_list = sorted(v, key=lambda x:x[3], reverse=True) #need to sort this as the third key
+
+    outputf = open(output, "a")
+    for i in xrange(min(top_k, len(v_list))):
+        outputf.write("%d\t%s\n" % (sign_symbol(v_list[i][2]), vector_minus(v_list[i][0], v_list[i][1])))
+        outputf.write("%d\t%s\n" % (sign_symbol(-1.0 * v_list[i][2]), vector_minus(v_list[i][1], v_list[i][0])))
+    outputf.close()
 
 def sign_symbol(f):
     """
     return 0 if it is negative, return 1 if it is positove
     """
-    if 
+    if f >= 0.0:
+        return 1
+    else:
+        return 0
 
 def vector_minus(v1, v2):
     l = []
@@ -66,15 +78,14 @@ def vector_minus(v1, v2):
     if len(v1) == len(v2):
         for i in xrange(len(v1)):
             l.append(v1[i] - v2[i])
-        res += '('
-        for i in xrange(len(v1)-1):
-            res += str(l[i]) + ','
-        res += str(l[(len(v1)-1)]) + ')'
+        for i in xrange(len(v1)):
+            res += "F%d %f " % (i, l[i]) 
+    else:
+        sys.stderr.write("vector scales are not the same!!\n")
+        sys.stderr.write(str(v1) + ", " + str(v2))
     return res
-        
-            
 
-def x(feats):
+def x(feats, hyp):
     """
     return a vector of features from string feats.
     in our case the tuple has three elements
@@ -83,8 +94,13 @@ def x(feats):
     for feat in feats.split(' '):
         (k, v) = feat.split('=')
         l.append(float(v))
-    if len(l) == 3:
+    l.append(len(hyp))
+    if len(l) == 4:
+#        print tuple(l)
         return tuple(l)
+    else:
+        sys.stderr.write("there is no three features!!\n")
+        sys.stderr.write(feats + "\n")
     
 def with_prob(p):
     """
@@ -103,9 +119,9 @@ def alpha(score_diff):
     score_diff: absolute value of score difference.
     """
     if score_diff < 0.05:
-        return 0
+        return 0.0
     else:
-        return 1
+        return 1.0
 
 def g(hyp, ref):
     """
@@ -113,5 +129,38 @@ def g(hyp, ref):
     """
     stats = [0 for i in xrange(10)]
     stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(hyp,ref))]
-    g_score = bleu.bleuplus1(stats)
+    g_score = bleu.bleu(stats)
     return g_score
+
+optparser = optparse.OptionParser()
+optparser.add_option("-k", "--kbest-list", dest="klist", default="data/dev.100best", help="100-best translation lists")
+optparser.add_option("-r", "--reference", dest="ref", default="data/dev.ref", help="reference translation")
+(opts, _) = optparser.parse_args()
+
+SAMPLE_SIZE = 5000
+TOP_K = 50
+
+all_hyps = [pair.split(' ||| ') for pair in codecs.open(opts.klist, encoding="utf-8")]
+all_refs = [line for line in codecs.open(opts.ref, encoding="utf-8")]
+num_sents = len(all_refs)
+for i in xrange(0, num_sents):
+    if i % 5 == 0:
+        sys.stderr.write(".")
+    sampler(SAMPLE_SIZE, TOP_K, i, all_refs, all_hyps, "training.txt", False)
+
+#X=np.empty([0, 4])
+#Y=np.empty([0, 1])
+#for i in xrange(0, num_sents):
+#    if i % 5 == 0:
+#        sys.stderr.write(".")
+#    (otx, oty) = sampler(SAMPLE_SIZE, TOP_K, i, all_refs, all_hyps, "training.txt", False)
+#    X = vstack(X, otx)
+#    Y = vstack(Y, oty)
+#
+#regres = Ridge(fit_intercept=False, alpha=100.)
+#regres.fit(X, Y)
+#w = regres.coef_
+#print w
+        
+
+sys.stderr.write("\n")
